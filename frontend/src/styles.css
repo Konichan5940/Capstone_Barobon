@@ -440,19 +440,6 @@ main {
   margin-bottom: 16px;
 }
 
-.peak-image-panel {
-  margin-bottom: 16px;
-}
-
-.peak-image-panel img {
-  background: #101615;
-  border-radius: 8px;
-  display: block;
-  max-height: 540px;
-  object-fit: contain;
-  width: 100%;
-}
-
 .score-chart-wrap {
   overflow-x: auto;
   padding-bottom: 2px;
@@ -651,18 +638,72 @@ main {
   padding: 5px 9px;
 }
 
+.evidence-image-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: start;
+  margin-bottom: 14px;
+}
+
+.evidence-image-grid figure {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  min-height: 212px;
+  width: 100%;
+}
+
+.evidence-image-grid img {
+  aspect-ratio: 16 / 9;
+  background: #101615;
+  border-radius: 8px;
+  display: block;
+  height: 158px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.evidence-image-grid figcaption {
+  background: #fbfcfc;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #63706d;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 6px;
+  min-height: 32px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.evidence-image-empty {
+  margin: 0 0 14px;
+}
+
 .frame-grid {
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: start;
 }
 
 .frame-card {
   border: 1px solid #dce3e0;
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 176px;
   padding: 12px;
+  width: 100%;
+}
+
+.frame-card > div:first-child {
+  min-height: 40px;
 }
 
 .frame-card dl {
   display: grid;
+  flex: 1;
   grid-template-columns: 1fr auto;
   margin: 10px 0;
 }
@@ -681,6 +722,10 @@ main {
 .frame-card p,
 .text-list p {
   margin: 0;
+}
+
+.frame-card p {
+  min-height: 34px;
 }
 
 .text-list article {
@@ -760,5 +805,15 @@ main {
 
   .first-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .frame-grid,
+  .evidence-image-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .frame-card,
+  .evidence-image-grid figure {
+    width: 100%;
   }
 }

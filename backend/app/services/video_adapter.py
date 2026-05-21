@@ -29,12 +29,21 @@ def analyze_video_upload(filename: str, content: bytes, load_kg: float, leg_scor
 
     temp_path = _write_temp_video(content, suffix)
     try:
-        raw = analyze_video_per_second(temp_path, load_kg=load_kg, leg_score=leg_score)
+        raw = analyze_video_per_second(
+            temp_path,
+            load_kg=load_kg,
+            leg_score=leg_score,
+            image_score_threshold=settings.high_risk_threshold,
+        )
     finally:
         _safe_remove(temp_path)
 
     payload = build_barobon_payload(raw, filename, load_kg, leg_score)
-    media = {"peak_image_data_url": image_to_data_url(raw.get("worst", {}).get("img"))}
+    media = {
+        "peak_image_data_url": image_to_data_url(raw.get("worst", {}).get("img")),
+        "frame_image_data_urls": build_frame_image_media(raw),
+        "image_source": "video_analyzer_sample_frames",
+    }
     video_summary = build_video_summary(filename, payload, media)
 
     return {
@@ -85,7 +94,24 @@ def build_video_summary(filename: str, payload: dict[str, Any], media: dict[str,
         "peak_second": peak.get("second"),
         "peak_score": peak.get("score"),
         "has_peak_image": bool(media.get("peak_image_data_url")),
+        "has_frame_images": bool(media.get("frame_image_data_urls")),
+        "frame_image_count": len(media.get("frame_image_data_urls") or {}),
     }
+
+
+def build_frame_image_media(raw: dict[str, Any]) -> dict[str, str]:
+    images: dict[str, str] = {}
+    for item in raw.get("frame_images") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            sample_index = int(item["sample_index"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        data_url = image_to_data_url(item.get("img"))
+        if data_url:
+            images[f"F-{sample_index + 1:06d}"] = data_url
+    return images
 
 
 def image_to_data_url(rgb_image: Any) -> str | None:

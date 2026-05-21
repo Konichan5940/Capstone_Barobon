@@ -8,7 +8,7 @@ import {
   formatWindowTitle,
 } from "../utils/riskDisplay";
 
-export function EvidencePanel({ selectedWindow, frames }) {
+export function EvidencePanel({ selectedWindow, frames, imageFrames = [] }) {
   return (
     <section className="panel evidence-panel">
       <div className="panel-heading">
@@ -32,6 +32,22 @@ export function EvidencePanel({ selectedWindow, frames }) {
               <Layers3 size={14} /> {formatBodyParts(selectedWindow.dominant_body_parts)}
             </span>
           </div>
+
+          {imageFrames.length > 0 ? (
+            <div className="evidence-image-grid">
+              {imageFrames.map((frame) => (
+                <figure key={`${frame.frame_id}-image`}>
+                  <img src={frame.imageDataUrl} alt={`${frame.frame_id} 위험 자세 이미지`} />
+                  <figcaption>
+                    {frame.frame_id} · {frame.time_sec}s · RULA {frame.frame_score}점 · {formatSide(frame.side)}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          ) : (
+            <p className="muted evidence-image-empty">이 위험구간에 연결된 대표 이미지가 없습니다.</p>
+          )}
+
           <div className="frame-grid">
             {frames.map((frame) => (
               <article className="frame-card" key={frame.frame_id}>

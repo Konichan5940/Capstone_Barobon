@@ -30,6 +30,15 @@ class EvalResult:
     side: str = "Unknown"
 
 
+RISK_DRAW_CONNECTIONS = [
+    ("shoulder", "elbow"),
+    ("elbow", "wrist"),
+    ("wrist", "index"),
+    ("ear", "shoulder"),
+    ("shoulder", "hip"),
+]
+
+
 def prepare_mediapipe_resource_root():
     """Mirror MediaPipe model resources to an ASCII path for Windows native loaders."""
     try:
@@ -184,9 +193,25 @@ def eval_side(engine, p_world, hand_landmarks, load_kg, pts_n_l=None, pts_n_r=No
     }
     return EvalResult(rula_score, tr, la, nk, wr, ua, w_t, flags)
 
-def generate_final_report(res, engine, leg_score, load_kg, worst_img, worst_sec, max_s):
+
+def draw_risk_overlay(frame, draw_pts, label):
+    if frame is None or draw_pts is None:
+        return None
+
+    tmp = frame.copy()
+    h, w, _ = frame.shape
+    for p1, p2 in RISK_DRAW_CONNECTIONS:
+        if p1 not in draw_pts or p2 not in draw_pts:
+            continue
+        cv2.line(tmp, (int(draw_pts[p1][0]*w), int(draw_pts[p1][1]*h)), (int(draw_pts[p2][0]*w), int(draw_pts[p2][1]*h)), (0, 255, 0), 3)
+        cv2.circle(tmp, (int(draw_pts[p1][0]*w), int(draw_pts[p1][1]*h)), 5, (255, 255, 255), -1)
+    cv2.putText(tmp, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+    return cv2.cvtColor(tmp, cv2.COLOR_BGR2RGB)
+
+
+def generate_final_report(res, engine, leg_score, load_kg, worst_img, worst_sec, max_s, frame_images=None):
     if not res["sec"]: 
-        return {"summary": {"score": 1, "action": "데이터 없음", "total": 0}, "ts": res, "worst": {"img": None, "sec": 0, "score": 0}}
+        return {"summary": {"score": 1, "action": "데이터 없음", "total": 0}, "ts": res, "worst": {"img": None, "sec": 0, "score": 0}, "frame_images": []}
 
     if len(set(res["rula"])) == 1:
         top_indices = list(range(len(res["rula"])))
@@ -241,10 +266,11 @@ def generate_final_report(res, engine, leg_score, load_kg, worst_img, worst_sec,
     return {
         "summary": {"score": fin_r, "action": fin_a, "total": len(res["sec"]), "risk_details": risk_details}, 
         "ts": res, 
-        "worst": {"img": worst_img, "sec": worst_sec, "score": max_s}
+        "worst": {"img": worst_img, "sec": worst_sec, "score": max_s},
+        "frame_images": frame_images or []
     }
 
-def analyze_video_per_second(video_path, load_kg=0, leg_score=1):
+def analyze_video_per_second(video_path, load_kg=0, leg_score=1, image_score_threshold=5):
     prepare_mediapipe_resource_root()
     mp_holistic = mp.solutions.holistic
     holistic = mp_holistic.Holistic(model_complexity=2, min_detection_confidence=0.5, min_tracking_confidence=0.5)
@@ -258,6 +284,7 @@ def analyze_video_per_second(video_path, load_kg=0, leg_score=1):
     
     res = {"sec": [], "trunk": [], "elbow": [], "upper_arm": [], "neck": [], "wrist": [], "twist": [], "rula": [], "flags": [], "side": []}
     max_s, worst_img, worst_sec = -1, None, 0
+    frame_images = []
     engine = RULAEngine()
     
     history = deque(maxlen=3)
@@ -351,18 +378,23 @@ def analyze_video_per_second(video_path, load_kg=0, leg_score=1):
                     res["rula"].append(eval_res.rula_score)
                     res["flags"].append(eval_res.flags)
                     res["side"].append(eval_res.side)
+                    sample_index = len(res["sec"]) - 1
                     
+                    if not is_hold_frame and draw_pts is not None and eval_res.rula_score >= image_score_threshold:
+                        image = draw_risk_overlay(frame, draw_pts, f"RULA: {eval_res.rula_score}")
+                        if image is not None:
+                            frame_images.append({
+                                "sample_index": sample_index,
+                                "sec": round(curr_sec, 2),
+                                "score": eval_res.rula_score,
+                                "img": image,
+                            })
+
                     if not is_hold_frame and eval_res.rula_score > max_s:
                         max_s, worst_sec = eval_res.rula_score, round(curr_sec, 2)
-                        tmp = frame.copy()
-                        h, w, _ = frame.shape
-                        for p1, p2 in [('shoulder', 'elbow'), ('elbow', 'wrist'), ('wrist', 'index'), ('ear', 'shoulder'), ('shoulder', 'hip')]:
-                            cv2.line(tmp, (int(draw_pts[p1][0]*w), int(draw_pts[p1][1]*h)), (int(draw_pts[p2][0]*w), int(draw_pts[p2][1]*h)), (0, 255, 0), 3)
-                            cv2.circle(tmp, (int(draw_pts[p1][0]*w), int(draw_pts[p1][1]*h)), 5, (255, 255, 255), -1)
-                        cv2.putText(tmp, f"Max RULA: {max_s}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-                        worst_img = cv2.cvtColor(tmp, cv2.COLOR_BGR2RGB)
+                        worst_img = draw_risk_overlay(frame, draw_pts, f"Max RULA: {max_s}")
     finally:
         cap.release()
         holistic.close()
             
-    return generate_final_report(res, engine, leg_score, load_kg, worst_img, worst_sec, max_s)
+    return generate_final_report(res, engine, leg_score, load_kg, worst_img, worst_sec, max_s, frame_images)

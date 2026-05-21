@@ -4,7 +4,6 @@ import { analyzePayload, analyzeVideo, healthCheck } from "./api/analyzeApi";
 import { EvidencePanel } from "./components/EvidencePanel";
 import { FindingsPanel } from "./components/FindingsPanel";
 import { LimitationsBox } from "./components/LimitationsBox";
-import { PeakRiskImage } from "./components/PeakRiskImage";
 import { ProgressSteps } from "./components/ProgressSteps";
 import { ResultSummary } from "./components/ResultSummary";
 import { RulaScoreChart } from "./components/RulaScoreChart";
@@ -39,7 +38,34 @@ function App() {
   const selectedFrames = useMemo(() => {
     if (!result || !selectedWindow) return [];
     const ids = new Set(selectedWindow.representative_frame_ids);
-    return result.canonical.frames.filter((frame) => ids.has(frame.frame_id));
+    const imageMap = result.media?.frame_image_data_urls || {};
+    return result.canonical.frames
+      .filter((frame) => ids.has(frame.frame_id))
+      .map((frame) => ({
+        ...frame,
+        imageDataUrl: imageMap[frame.frame_id] || null,
+      }));
+  }, [result, selectedWindow]);
+
+  const selectedImageFrames = useMemo(() => {
+    if (!result || !selectedWindow) return [];
+    const imageMap = result.media?.frame_image_data_urls || {};
+    const framesById = new Map(result.canonical.frames.map((frame) => [frame.frame_id, frame]));
+    const windowFrameIds = selectedWindow.frame_ids || selectedWindow.representative_frame_ids || [];
+    const candidates = windowFrameIds
+      .map((id) => framesById.get(id))
+      .filter((frame) => frame && imageMap[frame.frame_id]);
+
+    if (!candidates.length) return [];
+
+    const representativeIds = new Set(selectedWindow.representative_frame_ids || []);
+    const representativeImages = candidates.filter((frame) => representativeIds.has(frame.frame_id));
+    const sourceFrames = representativeImages.length ? representativeImages : pickWindowImageFrames(candidates);
+
+    return sourceFrames.map((frame) => ({
+      ...frame,
+      imageDataUrl: imageMap[frame.frame_id],
+    }));
   }, [result, selectedWindow]);
 
   function handleFileChange(event) {
@@ -150,7 +176,6 @@ function App() {
       {error && <pre className="error-box">{error}</pre>}
 
       <ResultSummary result={result} />
-      <PeakRiskImage imageDataUrl={result?.media?.peak_image_data_url} peakEvent={result?.canonical?.peak_risk_event} />
 
       {result && (
         <>
@@ -161,7 +186,7 @@ function App() {
               selectedId={selectedWindow?.window_id}
               onSelect={setSelectedWindowId}
             />
-            <EvidencePanel selectedWindow={selectedWindow} frames={selectedFrames} />
+            <EvidencePanel selectedWindow={selectedWindow} frames={selectedFrames} imageFrames={selectedImageFrames} />
           </section>
           <FindingsPanel findings={result.llm_result.key_findings} recommendations={result.llm_result.recommendations} />
           <LimitationsBox limitations={result.llm_result.limitations} verification={result.verification} />
@@ -182,6 +207,15 @@ function formatBytes(bytes) {
     unitIndex += 1;
   }
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function pickWindowImageFrames(frames) {
+  const first = frames[0];
+  const peak = frames.reduce((best, frame) => (frame.frame_score > best.frame_score ? frame : best), first);
+  const last = frames[frames.length - 1];
+  return [first, peak, last].filter(
+    (frame, index, selected) => frame && selected.findIndex((item) => item.frame_id === frame.frame_id) === index,
+  );
 }
 
 createRoot(document.getElementById("root")).render(
