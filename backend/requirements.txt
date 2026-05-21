@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+python-dotenv==1.2.2
+openai==2.36.0
+pytest==8.3.4
+httpx==0.28.1
+opencv-python>=4.8.0
+mediapipe==0.10.14
+numpy>=1.26.0
+scipy>=1.11.0
