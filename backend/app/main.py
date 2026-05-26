@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.analyze import router as analyze_router
+from app.routes.video import router as video_router
 
 app = FastAPI(title="Barobon JSON LLM Ergonomics Report", version="0.1.0")
 
@@ -23,3 +24,4 @@ app.add_middleware(
 )
 
 app.include_router(analyze_router, prefix="/api")
+app.include_router(video_router, prefix="/api")

@@ -35,6 +35,8 @@ class Settings:
     ollama_num_predict: int = _int_env("OLLAMA_NUM_PREDICT", 2048)
     high_risk_threshold: int = _int_env("HIGH_RISK_THRESHOLD", 6)
     max_upload_bytes: int = _int_env("MAX_UPLOAD_BYTES", 5 * 1024 * 1024)
+    max_video_upload_bytes: int = _int_env("MAX_VIDEO_UPLOAD_BYTES", 300 * 1024 * 1024)
+    allowed_video_extensions: tuple[str, ...] = (".mp4", ".mov", ".avi")
 
 
 settings = Settings()

@@ -8,6 +8,15 @@ import httpx
 
 from app.config import settings
 from app.services.errors import PipelineInputError
+from app.services.evidence_builder import (
+    ANGLE_LABELS,
+    BODY_PART_LABELS,
+    DRIVER_LABELS,
+    FLAG_LABELS,
+    format_body_part_values,
+    format_driver_values,
+    format_side_value,
+)
 
 ANALYSIS_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -111,6 +120,7 @@ task_summary 또는 risk_summary에는 분석 절차나 시스템 동작을 설�
 예: "RULA 작업 자세 분석을 통해", "평가를 수행했습니다" 같은 문장은 금지한다.
 요약문에는 최종 점수/위험 수준, 고위험 구간 수, 주요 위험 부위, 주요 자세 요인, 집중 시간대 중 3개 이상을 포함하라.
 computed_summary의 값을 우선 사용해 사용자가 바로 행동 판단을 할 수 있는 핵심 위험 요약을 작성하라.
+자세/부위 명칭에는 trunk, wrist, trunk_flexion, wrist_angle 같은 영어 코드명을 쓰지 말고 몸통, 손목, 몸통 굴곡, 손목 부담처럼 한글 명칭만 사용하라.
 first_analysis_summary는 결과 화면 최상단 카드에 표시된다.
 first_analysis_summary.headline은 점수보다 현재 작업의 핵심 위험 구조를 먼저 말하라.
 first_analysis_summary.main_risk_cause는 가장 중요한 원인 1개를 중심으로 설명하라.
@@ -123,6 +133,7 @@ first_analysis_summary.focus_time_range에는 대표 위험 구간만 최대 3�
 OLLAMA_SYSTEM_PROMPT = """당신은 RULA 작업 자세 결과를 한국어로 요약하는 인간공학 해석 도우미다.
 입력 근거에 없는 숫자, 시간, 부위, 좌우 정보를 만들지 마라.
 절차 설명을 쓰지 말고 사용자가 바로 이해할 위험 요약과 개선 방향만 작성하라.
+trunk, wrist, trunk_flexion, wrist_angle 같은 영어 코드명은 쓰지 말고 한글 명칭만 사용하라.
 반드시 JSON 객체만 출력하라."""
 
 PROCEDURE_SUMMARY_PHRASES = (
@@ -286,7 +297,7 @@ def _render_ollama_evidence_text(evidence_bundle: dict) -> str:
         "<session_summary>",
         f"- assessment_method: {session['assessment_method']}",
         f"- duration_sec: {session['duration_sec']}",
-        f"- score_adjustments: {session['score_adjustments']}",
+        f"- score_adjustments: {_localize_mapping(session['score_adjustments'])}",
         "</session_summary>",
         "<selected_evidence_windows>",
     ]
@@ -299,8 +310,8 @@ def _render_ollama_evidence_text(evidence_bundle: dict) -> str:
             [
                 f'<window id="{window["window_id"]}" time="{window["start_sec"]}~{window["end_sec"]}">',
                 f"- max_score: {window['window_score_max']}",
-                f"- body_parts: {window['dominant_body_parts']}",
-                f"- drivers: {window['drivers']}",
+                f"- 주요 부위: {format_body_part_values(window['dominant_body_parts'])}",
+                f"- 자세 요인: {format_driver_values(window['drivers'])}",
                 "</window>",
             ]
         )
@@ -313,9 +324,9 @@ def _render_ollama_evidence_text(evidence_bundle: dict) -> str:
             f"- frame_id: {peak.get('frame_id')}",
             f"- second: {peak.get('second')}",
             f"- score: {peak.get('score')}",
-            f"- side: {peak.get('side')}",
-            f"- drivers: {peak.get('drivers')}",
-            f"- related_flags: {peak.get('related_flags')}",
+            f"- 좌우: {format_side_value(peak.get('side'))}",
+            f"- 자세 요인: {format_driver_values(peak.get('drivers'))}",
+            f"- 관련 플래그: {format_driver_values(peak.get('related_flags'))}",
             "</peak_risk_event>",
             f"<selected_evidence_ids>{selected_ids + [peak.get('frame_id')]}</selected_evidence_ids>",
             "<limitations>",
@@ -408,11 +419,73 @@ def _normalize_summary_fields(result: dict[str, Any], evidence_bundle: dict) -> 
         computed,
     )
 
-    return result
+    return _localize_analysis_result(result)
 
 
 def _is_procedure_summary(text: str) -> bool:
     return any(phrase in text for phrase in PROCEDURE_SUMMARY_PHRASES)
+
+
+LOCALIZE_LABELS = {
+    **ANGLE_LABELS,
+    **FLAG_LABELS,
+    **DRIVER_LABELS,
+    **BODY_PART_LABELS,
+    "left": "왼쪽",
+    "right": "오른쪽",
+    "Left": "왼쪽",
+    "Right": "오른쪽",
+    "Unknown": "알 수 없음",
+}
+
+
+def _localize_analysis_result(result: dict[str, Any]) -> dict[str, Any]:
+    first_summary = result.get("first_analysis_summary")
+    if isinstance(first_summary, dict):
+        for key, value in list(first_summary.items()):
+            if isinstance(value, list):
+                first_summary[key] = [_localize_text(item) for item in value]
+            else:
+                first_summary[key] = _localize_text(value)
+
+    for key in ("risk_summary", "task_summary"):
+        result[key] = _localize_text(result.get(key))
+
+    if isinstance(result.get("risk_highlights"), list):
+        result["risk_highlights"] = [_localize_text(item) for item in result["risk_highlights"]]
+
+    for finding in result.get("key_findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        finding["claim"] = _localize_text(finding.get("claim"))
+        finding["risk_factors"] = [_localize_text(item) for item in finding.get("risk_factors") or []]
+
+    for recommendation in result.get("recommendations") or []:
+        if not isinstance(recommendation, dict):
+            continue
+        recommendation["proposal"] = _localize_text(recommendation.get("proposal"))
+        recommendation["target_risk_factors"] = [
+            _localize_text(item) for item in recommendation.get("target_risk_factors") or []
+        ]
+
+    if isinstance(result.get("limitations"), list):
+        result["limitations"] = [_localize_text(item) for item in result["limitations"]]
+
+    return result
+
+
+def _localize_text(value: Any) -> str:
+    text = str(value or "").strip()
+    for token, label in sorted(LOCALIZE_LABELS.items(), key=lambda item: len(item[0]), reverse=True):
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])"
+        text = re.sub(pattern, label, text)
+    return text
+
+
+def _localize_mapping(values: dict | None) -> dict:
+    if not isinstance(values, dict):
+        return {}
+    return {_localize_text(key): value for key, value in values.items()}
 
 
 def _fallback_report(evidence_bundle: dict, reason: str, requested_provider: str = "openai") -> tuple[dict, dict]:
@@ -426,8 +499,9 @@ def _fallback_report(evidence_bundle: dict, reason: str, requested_provider: str
         evidence_ids.append(peak_frame_id)
     evidence_ids = list(dict.fromkeys(evidence_ids))
 
-    risk_factors = first_window["drivers"] if first_window else evidence_bundle["peak_risk_event"]["drivers"]
-    body_parts = first_window["dominant_body_parts"] if first_window else []
+    raw_risk_factors = first_window["drivers"] if first_window else evidence_bundle["peak_risk_event"]["drivers"]
+    risk_factors = format_driver_values(raw_risk_factors)
+    body_parts = format_body_part_values(first_window["dominant_body_parts"] if first_window else [])
     where = (
         f"{first_window['start_sec']}초부터 {first_window['end_sec']}초까지"
         if first_window
@@ -448,7 +522,7 @@ def _fallback_report(evidence_bundle: dict, reason: str, requested_provider: str
         },
         "key_findings": [
             {
-                "claim": f"{where} 고위험 자세가 관찰되었고 주요 부위는 {', '.join(body_parts) or 'unknown'}입니다.",
+                "claim": f"{where} 고위험 자세가 관찰되었고 주요 부위는 {', '.join(body_parts) or '알 수 없음'}입니다.",
                 "risk_factors": risk_factors,
                 "evidence_ids": evidence_ids,
                 "confidence": "medium",
@@ -463,6 +537,7 @@ def _fallback_report(evidence_bundle: dict, reason: str, requested_provider: str
         ],
         "limitations": list(dict.fromkeys([reason, *evidence_bundle["limitations"], "본 결과는 자세 부담 해석이며 의학적 진단이 아닙니다."])),
     }
+    result = _localize_analysis_result(result)
     return result, {
         "mode": "fallback",
         "requested_provider": requested_provider,

@@ -11,6 +11,15 @@ from app.services.verifier import verify_llm_result
 
 def run_analysis(filename: str, content: bytes, provider: str = "openai") -> dict:
     payload = parse_json_upload(filename, content)
+    return run_analysis_payload(payload, filename=filename, provider=provider)
+
+
+def run_analysis_payload(
+    payload: dict,
+    filename: str = "video-analysis",
+    provider: str = "openai",
+    media: dict | None = None,
+) -> dict:
     validation_warnings = validate_barobon_payload(payload)
     canonical = normalize_barobon_payload(payload, validation_warnings)
     canonical = attach_risk_windows(canonical)
@@ -18,7 +27,7 @@ def run_analysis(filename: str, content: bytes, provider: str = "openai") -> dic
     llm_result, llm_meta = generate_llm_report(evidence_bundle, provider=provider)
     verification = verify_llm_result(llm_result, evidence_bundle)
 
-    return {
+    result = {
         "status": "ok",
         "input_summary": {
             "filename": filename,
@@ -44,3 +53,6 @@ def run_analysis(filename: str, content: bytes, provider: str = "openai") -> dic
         "llm_meta": llm_meta,
         "verification": verification,
     }
+    if media:
+        result["media"] = media
+    return result

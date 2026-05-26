@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { analyzeJson, healthCheck } from "./api/analyzeApi";
+import { analyzePayload, analyzeVideo, healthCheck } from "./api/analyzeApi";
 import { EvidencePanel } from "./components/EvidencePanel";
 import { FindingsPanel } from "./components/FindingsPanel";
 import { LimitationsBox } from "./components/LimitationsBox";
@@ -9,86 +9,216 @@ import { ResultSummary } from "./components/ResultSummary";
 import { RulaScoreChart } from "./components/RulaScoreChart";
 import { RiskWindowList } from "./components/RiskWindowList";
 import { UploadPanel } from "./components/UploadPanel";
+import { WorkerActionSummary } from "./components/WorkerActionSummary";
+import { WorkerRiskTimeline } from "./components/WorkerRiskTimeline";
 import "./styles.css";
 
 function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [videoPayload, setVideoPayload] = useState(null);
+  const [videoMedia, setVideoMedia] = useState(null);
+  const [videoSummary, setVideoSummary] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [phase, setPhase] = useState("idle");
   const [selectedWindowId, setSelectedWindowId] = useState(null);
+  const [selectedFrameId, setSelectedFrameId] = useState(null);
   const [health, setHealth] = useState(null);
   const [llmProvider, setLlmProvider] = useState("openai");
+  const [loadKg, setLoadKg] = useState(5);
+  const [legScore, setLegScore] = useState(1);
+  const [viewMode, setViewMode] = useState("worker");
 
   useEffect(() => {
     healthCheck().then(setHealth).catch(() => setHealth({ status: "offline" }));
   }, []);
 
+  const orderedWindows = useMemo(() => {
+    const windows = result?.canonical?.windows || [];
+    return [...windows].sort(compareWindowsByTime);
+  }, [result]);
+
   const selectedWindow = useMemo(() => {
     const windows = result?.canonical?.windows || [];
-    return windows.find((window) => window.window_id === selectedWindowId) || windows[0] || null;
+    return windows.find((window) => window.window_id === selectedWindowId) || pickInitialWindow(windows);
   }, [result, selectedWindowId]);
 
   const selectedFrames = useMemo(() => {
     if (!result || !selectedWindow) return [];
     const ids = new Set(selectedWindow.representative_frame_ids);
-    return result.canonical.frames.filter((frame) => ids.has(frame.frame_id));
+    const imageMap = result.media?.frame_image_data_urls || {};
+    return result.canonical.frames
+      .filter((frame) => ids.has(frame.frame_id))
+      .map((frame) => ({
+        ...frame,
+        imageDataUrl: imageMap[frame.frame_id] || null,
+      }));
   }, [result, selectedWindow]);
 
-  async function handleFileChange(event) {
+  const selectedImageFrames = useMemo(() => {
+    if (!result || !selectedWindow) return [];
+    const imageMap = result.media?.frame_image_data_urls || {};
+    const framesById = new Map(result.canonical.frames.map((frame) => [frame.frame_id, frame]));
+    const windowFrameIds = selectedWindow.frame_ids || selectedWindow.representative_frame_ids || [];
+    const candidates = windowFrameIds
+      .map((id) => framesById.get(id))
+      .filter((frame) => frame && imageMap[frame.frame_id]);
+
+    if (!candidates.length) return [];
+
+    const representativeIds = new Set(selectedWindow.representative_frame_ids || []);
+    const representativeImages = candidates.filter((frame) => representativeIds.has(frame.frame_id));
+    const sourceFrames = representativeImages.length ? representativeImages : pickWindowImageFrames(candidates);
+
+    return sourceFrames.map((frame) => ({
+      ...frame,
+      imageDataUrl: imageMap[frame.frame_id],
+    }));
+  }, [result, selectedWindow]);
+
+  const workerRiskFrames = useMemo(() => {
+    if (!result) return [];
+    const imageMap = result.media?.frame_image_data_urls || {};
+    const framesById = new Map(result.canonical.frames.map((frame) => [frame.frame_id, frame]));
+
+    return orderedWindows.flatMap((window) => (
+      getWindowFrameIds(window)
+        .map((frameId) => framesById.get(frameId))
+        .filter(Boolean)
+        .map((frame) => ({
+          frame: {
+            ...frame,
+            imageDataUrl: imageMap[frame.frame_id] || null,
+          },
+          windowId: window.window_id,
+        }))
+    ));
+  }, [orderedWindows, result]);
+
+  const selectedWindowFrames = useMemo(() => (
+    workerRiskFrames
+      .filter((item) => item.windowId === selectedWindow?.window_id)
+      .map((item) => item.frame)
+  ), [selectedWindow, workerRiskFrames]);
+
+  const selectedFrame = useMemo(() => (
+    selectedWindowFrames.find((frame) => frame.frame_id === selectedFrameId)
+    || selectedWindowFrames[0]
+    || null
+  ), [selectedFrameId, selectedWindowFrames]);
+
+  const selectedFrameIndex = selectedFrame
+    ? selectedWindowFrames.findIndex((frame) => frame.frame_id === selectedFrame.frame_id)
+    : -1;
+
+  const selectedFrameCursor = workerRiskFrames.findIndex((item) => (
+    item.windowId === selectedWindow?.window_id
+    && item.frame.frame_id === selectedFrame?.frame_id
+  ));
+  const canMovePreviousFrame = selectedFrameCursor > 0;
+  const canMoveNextFrame = (
+    selectedFrameCursor >= 0
+    && selectedFrameCursor < workerRiskFrames.length - 1
+  );
+
+  function handleFileChange(event) {
     const selected = event.target.files?.[0] || null;
     setFile(selected);
     setResult(null);
     setError("");
     setSelectedWindowId(null);
+    setSelectedFrameId(null);
+    setVideoPayload(null);
+    setVideoMedia(null);
+    setVideoSummary(null);
+    setViewMode("worker");
+
     if (!selected) {
       setPreview(null);
+      setPhase("idle");
       return;
     }
-    try {
-      const text = await selected.text();
-      const payload = JSON.parse(text);
-      const rula = payload?.time_series_data?.rula || [];
-      setPreview({
-        finalScore: payload?.summary?.score,
-        totalFrames: payload?.summary?.total || payload?.time_series_data?.sec?.length,
-        frameMax: rula.length ? Math.max(...rula) : "-",
-        shape: payload?.time_series_data ? "Barobon columnar" : "unknown",
-      });
-    } catch {
-      setPreview({ finalScore: "-", totalFrames: "-", frameMax: "-", shape: "JSON 확인 필요" });
-    }
+
+    setPreview({
+      type: selected.name.split(".").pop()?.toUpperCase() || selected.type || "VIDEO",
+      size: formatBytes(selected.size),
+    });
+    setPhase("video-selected");
   }
 
-  async function handleAnalyze() {
+  async function handleVideoAnalyze() {
     if (!file) return;
     setError("");
     setResult(null);
-    const phases = [0, 1, 2, 3];
-    let timerIndex = 0;
-    setPhase(phases[timerIndex]);
-    const timer = window.setInterval(() => {
-      timerIndex = Math.min(timerIndex + 1, phases.length - 1);
-      setPhase(phases[timerIndex]);
-    }, 550);
+    setVideoPayload(null);
+    setVideoMedia(null);
+    setVideoSummary(null);
+    setSelectedWindowId(null);
+    setSelectedFrameId(null);
+    setViewMode("worker");
+    setPhase("video-analyzing");
+
     try {
-      const analysis = await analyzeJson(file, llmProvider);
+      const analysis = await analyzeVideo(file, { loadKg, legScore });
+      setVideoPayload(analysis.payload);
+      setVideoMedia(analysis.media);
+      setVideoSummary(analysis.video_summary);
+      setPhase("video-ready");
+    } catch (err) {
+      setError(err.message);
+      setPhase(file ? "video-selected" : "idle");
+    }
+  }
+
+  async function handleResultAnalyze() {
+    if (!videoPayload) return;
+    setError("");
+    setResult(null);
+    setSelectedWindowId(null);
+    setSelectedFrameId(null);
+    setViewMode("worker");
+    setPhase("llm-analyzing");
+
+    try {
+      const analysis = await analyzePayload({
+        payload: videoPayload,
+        provider: llmProvider,
+        filename: file?.name || videoSummary?.filename || "video-analysis",
+        media: videoMedia,
+      });
+      const initialWindow = pickInitialWindow(analysis.canonical.windows);
       setResult(analysis);
-      setSelectedWindowId(analysis.canonical.windows[0]?.window_id || null);
+      setSelectedWindowId(initialWindow?.window_id || null);
+      setSelectedFrameId(getWindowFrameIds(initialWindow)[0] || null);
       setPhase("done");
     } catch (err) {
       setError(err.message);
-      setPhase("idle");
-    } finally {
-      window.clearInterval(timer);
+      setPhase("video-ready");
     }
+  }
+
+  const isVideoAnalyzing = phase === "video-analyzing";
+  const isResultAnalyzing = phase === "llm-analyzing";
+  const canAnalyzeResult = Boolean(videoPayload?.time_series_data?.sec?.length);
+
+  function handleWorkerWindowSelect(windowId) {
+    const window = orderedWindows.find((item) => item.window_id === windowId);
+    setSelectedWindowId(windowId);
+    setSelectedFrameId(getWindowFrameIds(window)[0] || null);
+  }
+
+  function moveWorkerFrame(offset) {
+    const target = workerRiskFrames[selectedFrameCursor + offset];
+    if (!target) return;
+    setSelectedWindowId(target.windowId);
+    setSelectedFrameId(target.frame.frame_id);
   }
 
   return (
     <main>
       <header className="topbar">
-        <strong>RULA JSON LLM Report</strong>
+        <strong>RULA Video LLM Report</strong>
         <span className={health?.status === "ok" ? "health good" : "health"}>
           {health?.status === "ok"
             ? health.llm_configured?.openai
@@ -101,20 +231,53 @@ function App() {
       <UploadPanel
         file={file}
         preview={preview}
+        videoSummary={videoSummary}
         llmProvider={llmProvider}
-        isAnalyzing={typeof phase === "number"}
+        loadKg={loadKg}
+        legScore={legScore}
+        isVideoAnalyzing={isVideoAnalyzing}
+        isResultAnalyzing={isResultAnalyzing}
+        canAnalyzeResult={canAnalyzeResult}
         onFileChange={handleFileChange}
+        onLoadKgChange={setLoadKg}
+        onLegScoreChange={setLegScore}
         onProviderChange={setLlmProvider}
-        onAnalyze={handleAnalyze}
+        onVideoAnalyze={handleVideoAnalyze}
+        onResultAnalyze={handleResultAnalyze}
       />
 
       <ProgressSteps phase={phase} />
 
       {error && <pre className="error-box">{error}</pre>}
 
-      <ResultSummary result={result} />
+      <ResultSummary result={result} viewMode={viewMode} onViewModeChange={setViewMode} />
 
-      {result && (
+      {result && viewMode === "worker" && (
+        <>
+          <WorkerRiskTimeline
+            frames={result.canonical.frames}
+            interactionEnabled
+            onSelectWindow={handleWorkerWindowSelect}
+            samplingHz={result.canonical.task.sampling_hz}
+            selectedWindowId={selectedWindow?.window_id}
+            windows={result.canonical.windows}
+          />
+          <EvidencePanel
+            canMoveNext={canMoveNextFrame}
+            canMovePrevious={canMovePreviousFrame}
+            expanded
+            frameCount={selectedWindowFrames.length}
+            frameIndex={selectedFrameIndex}
+            onMoveNext={() => moveWorkerFrame(1)}
+            onMovePrevious={() => moveWorkerFrame(-1)}
+            selectedFrame={selectedFrame}
+            selectedWindow={selectedWindow}
+          />
+          <WorkerActionSummary result={result} />
+        </>
+      )}
+
+      {result && viewMode === "user" && (
         <>
           <RulaScoreChart frames={result.canonical.frames} windows={result.canonical.windows} />
           <section className="workspace-grid">
@@ -123,13 +286,54 @@ function App() {
               selectedId={selectedWindow?.window_id}
               onSelect={setSelectedWindowId}
             />
-            <EvidencePanel selectedWindow={selectedWindow} frames={selectedFrames} />
+            <EvidencePanel selectedWindow={selectedWindow} frames={selectedFrames} imageFrames={selectedImageFrames} />
           </section>
           <FindingsPanel findings={result.llm_result.key_findings} recommendations={result.llm_result.recommendations} />
           <LimitationsBox limitations={result.llm_result.limitations} verification={result.verification} />
         </>
       )}
     </main>
+  );
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function pickWindowImageFrames(frames) {
+  const first = frames[0];
+  const peak = frames.reduce((best, frame) => (frame.frame_score > best.frame_score ? frame : best), first);
+  const last = frames[frames.length - 1];
+  return [first, peak, last].filter(
+    (frame, index, selected) => frame && selected.findIndex((item) => item.frame_id === frame.frame_id) === index,
+  );
+}
+
+function getWindowFrameIds(window) {
+  return window?.frame_ids || window?.representative_frame_ids || [];
+}
+
+function pickInitialWindow(windows = []) {
+  return [...windows].sort((left, right) => (
+    Number(right.window_score_max || 0) - Number(left.window_score_max || 0)
+    || compareWindowsByTime(left, right)
+  ))[0] || null;
+}
+
+function compareWindowsByTime(left, right) {
+  return (
+    Number(left.start_sec || 0) - Number(right.start_sec || 0)
+    || Number(left.end_sec || 0) - Number(right.end_sec || 0)
+    || String(left.window_id || "").localeCompare(String(right.window_id || ""))
   );
 }
 

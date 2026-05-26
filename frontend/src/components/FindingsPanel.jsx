@@ -1,4 +1,5 @@
 import { Lightbulb, ShieldAlert } from "lucide-react";
+import { formatDrivers, localizeRiskText } from "../utils/riskDisplay";
 
 export function FindingsPanel({ findings, recommendations }) {
   return (
@@ -11,8 +12,11 @@ export function FindingsPanel({ findings, recommendations }) {
         <div className="text-list">
           {findings.map((finding, index) => (
             <article key={`${finding.claim}-${index}`}>
-              <p>{finding.claim}</p>
+              <p>{localizeRiskText(finding.claim)}</p>
               <div className="chips">
+                {(finding.risk_factors || []).map((factor) => (
+                  <span key={factor}>{localizeRiskText(factor)}</span>
+                ))}
                 {finding.evidence_ids.map((id) => (
                   <span key={id}>{id}</span>
                 ))}
@@ -30,10 +34,10 @@ export function FindingsPanel({ findings, recommendations }) {
         <div className="text-list">
           {recommendations.map((item, index) => (
             <article key={`${item.proposal}-${index}`}>
-              <p>{item.proposal}</p>
+              <p>{localizeRiskText(item.proposal)}</p>
               <div className="chips">
-                {item.target_risk_factors.map((factor) => (
-                  <span key={factor}>{factor}</span>
+                {(item.target_risk_factors || []).map((factor) => (
+                  <span key={factor}>{formatDrivers([factor])}</span>
                 ))}
               </div>
             </article>
@@ -43,4 +47,3 @@ export function FindingsPanel({ findings, recommendations }) {
     </section>
   );
 }
-

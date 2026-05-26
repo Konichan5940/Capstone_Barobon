@@ -27,6 +27,11 @@ def health() -> dict:
             "ollama": settings.ollama_model,
         },
         "high_risk_threshold": settings.high_risk_threshold,
+        "video_analysis": {
+            "available": True,
+            "allowed_extensions": list(settings.allowed_video_extensions),
+            "max_upload_mb": settings.max_video_upload_bytes // (1024 * 1024),
+        },
     }
 
 

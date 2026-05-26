@@ -20,10 +20,40 @@ DRIVER_LABELS = {
     "neck_twist": "목 비틀림",
     "wrist_angle": "손목 부담",
     "wrist_deviation": "손목 편위",
+    "wrist_twist": "손목 비틀림",
     "upper_arm_elevation": "상완 거상",
     "arm_abduction": "상완 벌림",
     "repetition_or_static": "반복/정적 자세",
     "heavy_load": "과도한 하중",
+}
+
+ANGLE_LABELS = {
+    "trunk_deg": "몸통 각도",
+    "elbow_deg": "팔꿈치 각도",
+    "upper_arm_deg": "상완 각도",
+    "neck_deg": "목 각도",
+    "wrist_deg": "손목 각도",
+    "twist_score": "손목 비틀림 점수",
+}
+
+FLAG_LABELS = {
+    "arm_abd": "상완 벌림",
+    "wrist_deviation": "손목 편위",
+    "wr_dev": "손목 편위",
+    "neck_twist": "목 비틀림",
+    "nk_tw": "목 비틀림",
+    "trunk_twist": "몸통 비틀림",
+    "tr_tw": "몸통 비틀림",
+    "wrist_twist": "손목 비틀림",
+    "repetition_or_static": "반복/정적 자세",
+    "heavy_load": "과도한 하중",
+}
+
+SIDE_LABELS = {
+    "left": "왼쪽",
+    "right": "오른쪽",
+    "unknown": "알 수 없음",
+    "": "알 수 없음",
 }
 
 ACTION_BY_DRIVER = {
@@ -33,11 +63,24 @@ ACTION_BY_DRIVER = {
     "neck_flexion": "대상물을 눈높이에 가깝게 배치해 목을 숙이는 시간을 줄이세요.",
     "wrist_angle": "손목이 꺾이지 않도록 작업 높이와 도구 방향을 조정하세요.",
     "wrist_deviation": "손목을 옆으로 꺾거나 비트는 동작을 줄이도록 손잡이 방향을 바꾸세요.",
+    "wrist_twist": "손목을 비트는 동작이 줄도록 도구 방향과 손잡이 위치를 조정하세요.",
     "upper_arm_elevation": "팔을 몸 가까이에 둘 수 있도록 작업 거리를 줄이세요.",
     "arm_abduction": "팔을 벌린 상태가 오래 유지되지 않도록 대상물을 몸 가까이에 배치하세요.",
     "repetition_or_static": "같은 자세가 반복되지 않도록 작업을 나누고 짧은 휴식 구간을 넣으세요.",
     "heavy_load": "하중을 줄이거나 보조 장비 사용을 먼저 검토하세요.",
 }
+
+
+def format_body_part_values(values) -> list[str]:
+    return _format_label_values(values, BODY_PART_LABELS)
+
+
+def format_driver_values(values) -> list[str]:
+    return _format_label_values(values, DRIVER_LABELS)
+
+
+def format_side_value(value) -> str:
+    return SIDE_LABELS.get(str(value or "").strip().lower(), "알 수 없음")
 
 
 def build_evidence_bundle(canonical: dict) -> dict:
@@ -155,7 +198,8 @@ def _render_evidence_text(bundle: dict) -> str:
 
     lines.append("<session_summary>")
     for key, value in bundle["session_summary"].items():
-        lines.append(f"- {key}: {value}")
+        rendered_value = _format_score_adjustments(value) if key == "score_adjustments" else value
+        lines.append(f"- {key}: {rendered_value}")
     lines.append("</session_summary>")
 
     lines.append("<high_risk_windows>")
@@ -164,8 +208,8 @@ def _render_evidence_text(bundle: dict) -> str:
             f'<window id="{window["window_id"]}" time="{window["start_sec"]}~{window["end_sec"]}">'
         )
         lines.append(f"- max_score: {window['window_score_max']}")
-        lines.append(f"- body_parts: {', '.join(window['dominant_body_parts']) or 'unknown'}")
-        lines.append(f"- drivers: {', '.join(window['drivers']) or 'unknown'}")
+        lines.append(f"- 주요 부위: {_join_or_unknown(format_body_part_values(window['dominant_body_parts']))}")
+        lines.append(f"- 자세 요인: {_join_or_unknown(format_driver_values(window['drivers']))}")
         lines.append(f"- representative_frames: {', '.join(window['representative_frame_ids'])}")
         lines.append("</window>")
     lines.append("</high_risk_windows>")
@@ -174,10 +218,10 @@ def _render_evidence_text(bundle: dict) -> str:
     for frame in bundle["representative_frames"]:
         lines.append(f'<frame id="{frame["frame_id"]}" time_sec="{frame["time_sec"]}">')
         lines.append(f"- frame_score: {frame['frame_score']}")
-        lines.append(f"- side: {frame['side']}")
-        lines.append(f"- angles: {frame['angles']}")
-        lines.append(f"- flags: {frame['flags']}")
-        lines.append(f"- drivers: {frame['drivers']}")
+        lines.append(f"- 좌우: {format_side_value(frame['side'])}")
+        lines.append(f"- 각도: {_format_labeled_mapping(frame['angles'], ANGLE_LABELS)}")
+        lines.append(f"- 세부 플래그: {_format_labeled_mapping(frame['flags'], FLAG_LABELS)}")
+        lines.append(f"- 자세 요인: {format_driver_values(frame['drivers'])}")
         lines.append("</frame>")
     lines.append("</representative_frames>")
 
@@ -198,12 +242,37 @@ def _top_raw_values(values) -> list[str]:
     return [value for value, _ in counter.most_common()]
 
 
+def _format_label_values(values, labels: dict[str, str]) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not values:
+        return []
+    return [labels.get(str(value or "").strip(), str(value or "").strip() or "알 수 없음") for value in values]
+
+
 def _body_part_label(value: str) -> str:
     return BODY_PART_LABELS.get(value, value or "알 수 없음")
 
 
 def _driver_label(value: str) -> str:
     return DRIVER_LABELS.get(value, value or "알 수 없음")
+
+
+def _join_or_unknown(values: list[str]) -> str:
+    cleaned = [value for value in values if value]
+    return ", ".join(cleaned) if cleaned else "알 수 없음"
+
+
+def _format_labeled_mapping(values: dict | None, labels: dict[str, str]) -> dict:
+    if not isinstance(values, dict) or not values:
+        return {}
+    return {labels.get(str(key), str(key)): value for key, value in values.items()}
+
+
+def _format_score_adjustments(values: dict | None) -> dict:
+    if not isinstance(values, dict) or not values:
+        return {}
+    return {DRIVER_LABELS.get(str(key), FLAG_LABELS.get(str(key), str(key))): value for key, value in values.items()}
 
 
 def _dedupe(values: list[str]) -> list[str]:

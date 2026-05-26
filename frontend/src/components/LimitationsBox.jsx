@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { localizeRiskText } from "../utils/riskDisplay";
 
 export function LimitationsBox({ limitations, verification }) {
   const warnings = verification?.warnings || [];
@@ -10,10 +11,9 @@ export function LimitationsBox({ limitations, verification }) {
       </div>
       <ul>
         {[...limitations, ...warnings].map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
+          <li key={`${item}-${index}`}>{localizeRiskText(item)}</li>
         ))}
       </ul>
     </section>
   );
 }
-

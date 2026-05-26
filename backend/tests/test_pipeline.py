@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.services.errors import PipelineInputError
+from app.services.evidence_builder import build_evidence_bundle
 from app.services.parser import parse_json_upload
 from app.services.pipeline import run_analysis
 from app.services.validator import validate_barobon_payload
 from app.services.verifier import verify_llm_result
-from app.services.llm_client import _normalize_summary_fields
+from app.services.llm_client import _localize_analysis_result, _normalize_summary_fields
 
 SAMPLE_PATH = Path(__file__).resolve().parents[1] / "app" / "samples" / "barobon_analysis_result_2.json"
 
@@ -123,3 +124,56 @@ def test_first_analysis_summary_fallback_contract_is_complete() -> None:
     assert first_summary["priority_action"]
     assert len(first_summary["top_3_actions"]) <= 3
     assert len(result["evidence_bundle"]["computed_summary"]["priority_focus_windows"]) <= 3
+
+
+def test_evidence_text_uses_korean_labels_for_risk_codes() -> None:
+    result = run_analysis("sample.json", SAMPLE_PATH.read_bytes())
+    evidence_text = build_evidence_bundle(result["canonical"])["evidence_text"]
+    forbidden = ("trunk_twist", "wrist_angle", "wrist_deviation", "upper_arm_elevation", "neck_twist")
+
+    assert all(token not in evidence_text for token in forbidden)
+    assert "몸통 비틀림" in evidence_text
+
+
+def test_llm_result_risk_codes_are_localized() -> None:
+    result = {
+        "analysis_status": "llm",
+        "first_analysis_summary": {
+            "headline": "trunk_flexion과 wrist_angle이 반복됩니다.",
+            "risk_level_summary": "trunk, wrist 부담이 큽니다.",
+            "main_risk_cause": "trunk_twist",
+            "priority_action": "wrist_deviation을 줄이세요.",
+            "focus_time_range": "left 구간",
+            "top_3_actions": ["upper_arm_elevation 완화"],
+        },
+        "risk_summary": "neck_flexion 및 wrist_angle 확인",
+        "risk_highlights": ["주요 부위: trunk, wrist"],
+        "task_summary": "trunk_flexion 확인",
+        "overall_assessment": {"final_score": 7, "frame_score_max": 6, "severity_label": "즉각적인 개선 필요", "evidence_ids": []},
+        "key_findings": [
+            {
+                "claim": "trunk_twist와 wrist_angle이 동시에 나타납니다.",
+                "risk_factors": ["trunk_twist", "wrist_angle"],
+                "evidence_ids": ["W-001"],
+                "confidence": "medium",
+            }
+        ],
+        "recommendations": [
+            {
+                "proposal": "wrist_deviation을 줄입니다.",
+                "target_risk_factors": ["wrist_deviation", "upper_arm_elevation"],
+                "evidence_ids": ["W-001"],
+            }
+        ],
+        "limitations": ["side가 left로만 확인됨"],
+    }
+
+    localized = _localize_analysis_result(result)
+    rendered = json.dumps(localized, ensure_ascii=False)
+
+    assert "trunk_twist" not in rendered
+    assert "wrist_angle" not in rendered
+    assert "upper_arm_elevation" not in rendered
+    assert "몸통 비틀림" in rendered
+    assert "손목 부담" in rendered
+    assert "상완 거상" in rendered
