@@ -25,6 +25,7 @@ function App() {
   const [llmProvider, setLlmProvider] = useState("openai");
   const [loadKg, setLoadKg] = useState(5);
   const [legScore, setLegScore] = useState(1);
+  const [viewMode, setViewMode] = useState("worker");
 
   useEffect(() => {
     healthCheck().then(setHealth).catch(() => setHealth({ status: "offline" }));
@@ -77,6 +78,7 @@ function App() {
     setVideoPayload(null);
     setVideoMedia(null);
     setVideoSummary(null);
+    setViewMode("worker");
 
     if (!selected) {
       setPreview(null);
@@ -99,6 +101,7 @@ function App() {
     setVideoMedia(null);
     setVideoSummary(null);
     setSelectedWindowId(null);
+    setViewMode("worker");
     setPhase("video-analyzing");
 
     try {
@@ -118,6 +121,7 @@ function App() {
     setError("");
     setResult(null);
     setSelectedWindowId(null);
+    setViewMode("worker");
     setPhase("llm-analyzing");
 
     try {
@@ -175,9 +179,9 @@ function App() {
 
       {error && <pre className="error-box">{error}</pre>}
 
-      <ResultSummary result={result} />
+      <ResultSummary result={result} viewMode={viewMode} onViewModeChange={setViewMode} />
 
-      {result && (
+      {result && viewMode === "user" && (
         <>
           <RulaScoreChart frames={result.canonical.frames} windows={result.canonical.windows} />
           <section className="workspace-grid">

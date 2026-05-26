@@ -294,6 +294,47 @@ main {
   gap: 16px;
 }
 
+.diagnosis-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.view-mode-switch {
+  border: 1px solid #cbd5d1;
+  border-radius: 8px;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.view-mode-button {
+  background: #ffffff;
+  border: 0;
+  border-right: 1px solid #cbd5d1;
+  color: #42504c;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 0 15px;
+}
+
+.view-mode-button:last-child {
+  border-right: 0;
+}
+
+.view-mode-button.active {
+  background: #135f55;
+  color: #ffffff;
+}
+
+.view-mode-button:focus-visible {
+  outline: 2px solid #2a8f78;
+  outline-offset: -2px;
+}
+
 .status-pill {
   align-items: center;
   border-radius: 999px;
@@ -801,6 +842,10 @@ main {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .diagnosis-actions {
+    align-items: flex-start;
   }
 
   .first-summary-grid {

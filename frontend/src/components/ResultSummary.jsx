@@ -1,13 +1,14 @@
 import { AlertTriangle, BadgeCheck, Clock3, Gauge, ListChecks, Target, Wrench } from "lucide-react";
 import { formatBodyParts, localizeRiskText } from "../utils/riskDisplay";
 
-export function ResultSummary({ result }) {
+export function ResultSummary({ result, viewMode, onViewModeChange }) {
   if (!result) return null;
   const summary = result.input_summary;
   const llm = result.llm_result;
   const verification = result.verification;
   const computed = result.evidence_bundle?.computed_summary;
   const firstSummary = buildFirstSummary(llm, computed);
+  const isUserView = viewMode === "user";
   const highlights = Array.isArray(llm.risk_highlights) && llm.risk_highlights.length
     ? llm.risk_highlights.map(localizeRiskText)
     : computed
@@ -25,10 +26,30 @@ export function ResultSummary({ result }) {
           <p className="eyebrow">첫 분석 요약</p>
           <h2>{firstSummary.headline}</h2>
         </div>
-        <span className={`status-pill ${verification.passed ? "ok" : "warn"}`}>
-          {verification.passed ? <BadgeCheck size={16} /> : <AlertTriangle size={16} />}
-          {verification.passed ? "근거 검증 통과" : "근거 확인 필요"}
-        </span>
+        <div className="diagnosis-actions">
+          <div className="view-mode-switch" role="group" aria-label="결과 화면 대상 선택">
+            <button
+              className={`view-mode-button ${isUserView ? "active" : ""}`}
+              type="button"
+              aria-pressed={isUserView}
+              onClick={() => onViewModeChange("user")}
+            >
+              사용자용
+            </button>
+            <button
+              className={`view-mode-button ${!isUserView ? "active" : ""}`}
+              type="button"
+              aria-pressed={!isUserView}
+              onClick={() => onViewModeChange("worker")}
+            >
+              작업자용
+            </button>
+          </div>
+          <span className={`status-pill ${verification.passed ? "ok" : "warn"}`}>
+            {verification.passed ? <BadgeCheck size={16} /> : <AlertTriangle size={16} />}
+            {verification.passed ? "근거 검증 통과" : "근거 확인 필요"}
+          </span>
+        </div>
       </div>
 
       <div className="first-summary-grid">
@@ -66,7 +87,7 @@ export function ResultSummary({ result }) {
         </div>
       )}
 
-      {highlights.length > 0 && (
+      {isUserView && highlights.length > 0 && (
         <ul className="risk-highlights">
           {highlights.map((item, index) => (
             <li key={`${item}-${index}`}>{item}</li>
@@ -74,20 +95,24 @@ export function ResultSummary({ result }) {
         </ul>
       )}
 
-      <div className="metric-row">
-        <ScoreMetric icon={<Gauge size={20} />} label="최종 보정 점수" value={summary.final_score} tone="danger" />
-        <ScoreMetric icon={<Gauge size={20} />} label="프레임 최고 점수" value={summary.frame_score_max} tone="amber" />
-        <ScoreMetric icon={<ListChecks size={20} />} label="고위험 구간" value={summary.high_risk_window_count} tone="teal" />
-      </div>
+      {isUserView && (
+        <>
+          <div className="metric-row">
+            <ScoreMetric icon={<Gauge size={20} />} label="최종 보정 점수" value={summary.final_score} tone="danger" />
+            <ScoreMetric icon={<Gauge size={20} />} label="프레임 최고 점수" value={summary.frame_score_max} tone="amber" />
+            <ScoreMetric icon={<ListChecks size={20} />} label="고위험 구간" value={summary.high_risk_window_count} tone="teal" />
+          </div>
 
-      <div className="assessment-line">
-        <strong>{llm.overall_assessment.severity_label}</strong>
-        <span>평균 프레임 점수 {summary.frame_score_avg}</span>
-        <span>
-          {result.llm_meta.requested_provider === "ollama" ? "Qwen3.5 9B" : "GPT-4.1 mini"} ·{" "}
-          {result.llm_meta.mode === "fallback" ? "fallback 리포트" : result.llm_meta.model}
-        </span>
-      </div>
+          <div className="assessment-line">
+            <strong>{llm.overall_assessment.severity_label}</strong>
+            <span>평균 프레임 점수 {summary.frame_score_avg}</span>
+            <span>
+              {result.llm_meta.requested_provider === "ollama" ? "Qwen3.5 9B" : "GPT-4.1 mini"} ·{" "}
+              {result.llm_meta.mode === "fallback" ? "fallback 리포트" : result.llm_meta.model}
+            </span>
+          </div>
+        </>
+      )}
     </section>
   );
 }
